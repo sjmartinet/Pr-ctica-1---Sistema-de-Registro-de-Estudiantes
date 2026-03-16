@@ -1,0 +1,3 @@
+1001,Ana Garcia,08:30,
+1002,Carlos Lopez,09:15,11:30
+1003,Maria Torres,,
