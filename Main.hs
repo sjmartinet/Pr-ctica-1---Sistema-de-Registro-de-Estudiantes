@@ -1,284 +1,249 @@
--- ============================================================
--- PRÁCTICA 1 - SISTEMA DE REGISTRO DE ESTUDIANTES
--- Versión A: Haskell (Programación Funcional)
--- ST 0244 - Programación de Lenguajes de Programación - EAFIT
--- ============================================================
---
--- CÓMO COMPILAR Y EJECUTAR:
---   ghc Main.hs -o registro
---   ./registro
---
--- O con runghc (sin compilar):
---   runghc Main.hs
-
 module Main where
 
+-- Importamos las librerías que necesitamos.
+-- Control.Exception nos permite capturar errores (como archivo no encontrado).
+-- Data.List nos da la función 'find' para buscar en listas.
+-- Data.Maybe nos da 'fromMaybe' para extraer valores de un Maybe con un valor por defecto.
+-- Data.Time nos permite obtener la hora actual del sistema operativo.
+-- System.IO nos permite configurar la terminal.
 import Control.Exception (catch, IOException)
-import Data.List         (find, intercalate)
-import Data.Maybe        (fromMaybe)
-import System.IO         (hSetBuffering, stdout, BufferMode(..))
+import Data.List (find, intercalate)
+import Data.Maybe (fromMaybe)
+import Data.Time (getZonedTime, formatTime, defaultTimeLocale)
+import System.IO
 
--- ============================================================
--- 1. TIPO DE DATOS
--- ============================================================
--- Definimos cómo luce un "estudiante" en memoria.
--- Usamos 'Maybe String' para los tiempos:
---   Nothing  = todavía no tiene hora registrada
---   Just "08:30" = tiene hora registrada
---
--- Nota de Haskell: 'deriving Show' hace que Haskell pueda
--- imprimir el tipo automáticamente (útil para depurar).
+-- ================================================================
+-- MODELO DE DATOS
+-- ================================================================
 
-data Student = Student
-  { studentId   :: String        -- ID del estudiante, ej: "1001"
-  , studentName :: String        -- Nombre completo
-  , checkIn     :: Maybe String  -- Hora de entrada (HH:MM) o nada
-  , checkOut    :: Maybe String  -- Hora de salida  (HH:MM) o nada
+-- Definimos cómo luce un estudiante en la memoria del programa.
+-- En Haskell creamos un "tipo de dato" propio con la palabra 'data'.
+-- Cada campo tiene un nombre y un tipo.
+-- 'Maybe String' significa que el valor puede existir (Just "08:30")
+-- o no existir todavía (Nothing). Así modelamos horas no registradas.
+data Estudiante = Estudiante
+  { idEstudiante    :: String        -- Código único del estudiante
+  , nombre          :: String        -- Nombre completo
+  , horaEntrada     :: Maybe String  -- Hora de entrada: Just "HH:MM" o Nothing
+  , horaSalida      :: Maybe String  -- Hora de salida:  Just "HH:MM" o Nothing
   } deriving (Show, Eq)
+-- 'deriving Show' le dice a Haskell que sepa imprimir este tipo automáticamente.
+-- 'deriving Eq'   le dice que sepa comparar dos Estudiantes con ==.
 
--- ============================================================
--- 2. NOMBRE DEL ARCHIVO DE PERSISTENCIA
--- ============================================================
+-- ================================================================
+-- CONVERSIÓN ENTRE ESTUDIANTE Y LÍNEA DE TEXTO (CSV)
+-- ================================================================
 
-fileName :: String
-fileName = "University.txt"
-
--- ============================================================
--- 3. FUNCIONES DE CONVERSIÓN (Student <-> Línea de texto)
--- ============================================================
--- El archivo guarda cada estudiante en una línea así:
---   1001,Ana Garcia,08:30,10:45
---   1002,Carlos Lopez,09:15,
---
--- Si el campo de hora está vacío, significa 'Nothing'.
-
--- Convierte un estudiante a una línea de texto CSV
-studentToLine :: Student -> String
-studentToLine s = intercalate ","
-  [ studentId   s
-  , studentName s
-  , fromMaybe "" (checkIn  s)  -- Nothing → cadena vacía
-  , fromMaybe "" (checkOut s)
+-- Convierte un Estudiante a una línea de texto separada por comas.
+-- Ejemplo: Estudiante "1001" "Ana" (Just "08:30") Nothing
+--       →  "1001,Ana,08:30,"
+-- 'intercalate' une una lista de strings poniendo "," entre cada uno.
+-- 'fromMaybe ""' convierte Nothing en "" y Just "08:30" en "08:30".
+aLinea :: Estudiante -> String
+aLinea e = intercalate ","
+  [ idEstudiante e
+  , nombre e
+  , fromMaybe "" (horaEntrada e)
+  , fromMaybe "" (horaSalida  e)
   ]
 
--- Convierte una línea de texto CSV a un estudiante
--- Retorna 'Nothing' si la línea no tiene el formato correcto
-lineToStudent :: String -> Maybe Student
-lineToStudent line = case splitOn ',' line of
-  [i, n, ci, co] -> Just Student
-    { studentId   = i
-    , studentName = n
-    , checkIn     = if null ci then Nothing else Just ci
-    , checkOut    = if null co then Nothing else Just co
-    }
-  _              -> Nothing  -- Línea malformada, la ignoramos
+-- Convierte una línea de texto CSV a un Estudiante.
+-- Retorna 'Maybe Estudiante' porque la línea puede estar malformada.
+-- Si tiene exactamente 4 campos → Just Estudiante.
+-- Si tiene otro número de campos → Nothing (la ignoramos).
+desdeLinea :: String -> Maybe Estudiante
+desdeLinea linea = case dividir ',' linea of
+  [i, n, entrada, salida] -> Just $ Estudiante i n
+    (if null entrada then Nothing else Just entrada)
+    (if null salida  then Nothing else Just salida)
+  _ -> Nothing
 
--- Función auxiliar: divide un String usando un carácter separador
--- Ejemplo: splitOn ',' "a,b,c"  →  ["a","b","c"]
-splitOn :: Char -> String -> [String]
-splitOn _ ""     = [""]
-splitOn sep (c:cs)
-  | c == sep  = "" : splitOn sep cs
-  | otherwise = let (primero:resto) = splitOn sep cs
-                in (c:primero) : resto
+-- Función auxiliar: divide un String en una lista usando un carácter separador.
+-- Ejemplo: dividir ',' "a,b,c"  →  ["a", "b", "c"]
+-- Haskell no incluye esta función por defecto, así que la definimos nosotros.
+dividir :: Char -> String -> [String]
+dividir _ "" = [""]
+dividir sep (c:cs)
+  | c == sep  = "" : dividir sep cs           -- Encontramos separador: empezamos nuevo segmento
+  | otherwise = let (h:t) = dividir sep cs    -- No es separador: agregamos el caracter al segmento actual
+                in  (c:h) : t
 
--- ============================================================
--- 4. MANEJO DE ARCHIVOS
--- ============================================================
+-- ================================================================
+-- HORA DEL SISTEMA
+-- ================================================================
 
--- Carga la lista de estudiantes desde University.txt
--- Si el archivo no existe, retorna lista vacía
-loadStudents :: IO [Student]
-loadStudents = catch cargar manejarError
+-- Obtiene la hora local actual del sistema operativo en formato "HH:MM".
+-- 'getZonedTime' pide la hora al SO. 'formatTime' la convierte a texto.
+-- El símbolo '<$>' aplica la función formatTime al resultado de getZonedTime.
+ahora :: IO String
+ahora = formatTime defaultTimeLocale "%H:%M" <$> getZonedTime
+
+-- ================================================================
+-- MANEJO DEL ARCHIVO University.txt
+-- ================================================================
+
+-- Lee University.txt y devuelve la lista de estudiantes.
+-- Si el archivo no existe, devuelve lista vacía sin crashear.
+-- 'catch' captura el error de tipo IOException si ocurre.
+cargar :: IO [Estudiante]
+cargar = catch leer manejarError
   where
-    cargar = do
-      contenido <- readFile fileName
-      -- 'seq' fuerza la evaluación COMPLETA antes de continuar
-      -- (necesario en Haskell por su evaluación perezosa "lazy")
-      let estudiantes = [s | Just s <- map lineToStudent
-                                      (filter (not . null) (lines contenido))]
-      length estudiantes `seq` return estudiantes
+    leer = do
+      contenido <- readFile "University.txt"
+      -- Procesamos el contenido línea por línea:
+      -- 'lines'  → divide el texto en una lista de líneas
+      -- 'filter' → elimina las líneas vacías
+      -- 'map'    → intenta convertir cada línea a Estudiante
+      -- la notación [e | Just e <- ...]  → se queda solo con los Just
+      let lista = [e | Just e <- map desdeLinea $ filter (not . null) $ lines contenido]
+      -- Forzamos evaluación completa antes de continuar.
+      -- Haskell evalúa "de forma perezosa" (lazy), lo que significa
+      -- que no procesa datos hasta que los necesita. Esto causaría
+      -- que el archivo quede abierto cuando intentemos escribirlo.
+      -- 'length lista `seq` return lista' fuerza que la lista se
+      -- construya completamente antes de devolver el resultado.
+      length lista `seq` return lista
+    manejarError :: IOException -> IO [Estudiante]
+    manejarError _ = putStrLn "[INFO] Archivo no encontrado, iniciando vacio." >> return []
 
-    manejarError :: IOException -> IO [Student]
-    manejarError _ = do
-      putStrLn "Nota: University.txt no existe, iniciando con lista vacía."
-      return []
+-- Guarda la lista completa de estudiantes en University.txt.
+-- Sobreescribe el archivo entero cada vez (estrategia de archivo plano).
+guardar :: [Estudiante] -> IO ()
+guardar lista = do
+  writeFile "University.txt" (unlines $ map aLinea lista)
+  putStrLn "[OK] Guardado en University.txt."
 
--- Guarda la lista completa de estudiantes en University.txt
-saveStudents :: [Student] -> IO ()
-saveStudents estudiantes = do
-  writeFile fileName (unlines (map studentToLine estudiantes))
-  putStrLn "✓ Datos guardados en University.txt"
+-- ================================================================
+-- UTILIDADES
+-- ================================================================
 
--- ============================================================
--- 5. CÁLCULO DE TIEMPO
--- ============================================================
+-- Indica si un estudiante está actualmente dentro de la universidad.
+-- Condición: tiene hora de entrada registrada Y no tiene hora de salida.
+estaAdentro :: Estudiante -> Bool
+estaAdentro e = horaEntrada e /= Nothing && horaSalida e == Nothing
 
--- Convierte "HH:MM" a minutos totales (ej: "01:30" → 90)
-timeToMinutes :: String -> Int
-timeToMinutes t = case splitOn ':' t of
-  [hh, mm] -> read hh * 60 + read mm
-  _        -> 0
+-- Reemplaza un estudiante en la lista por una versión actualizada.
+-- Recorre toda la lista y sustituye el que tenga el mismo ID.
+-- Esta es la forma funcional de "modificar": construir una lista NUEVA.
+actualizar :: Estudiante -> [Estudiante] -> [Estudiante]
+actualizar nuevo = map (\e -> if idEstudiante e == idEstudiante nuevo then nuevo else e)
 
--- Calcula y muestra la diferencia entre hora de entrada y salida
-showDuration :: String -> String -> String
-showDuration inicio fin =
-  let minInicio = timeToMinutes inicio
-      minFin    = timeToMinutes fin
-      diff      = minFin - minInicio
-      horas     = diff `div` 60
-      minutos   = diff `mod` 60
-  in show horas ++ "h " ++ show minutos ++ "min"
+-- Calcula los minutos totales de una hora "HH:MM".
+-- Ejemplo: "09:45" → 585 minutos
+aMinutos :: String -> Int
+aMinutos t = case dividir ':' t of
+  [h, m] -> read h * 60 + read m
+  _      -> 0
 
--- ============================================================
--- 6. FUNCIONES DE CADA OPCIÓN DEL MENÚ
--- ============================================================
--- Nota importante de Haskell: como las listas son INMUTABLES,
--- cada función devuelve la lista NUEVA (modificada).
--- El menú principal siempre pasa la versión más reciente.
+-- Ajusta un texto a exactamente n caracteres (recorta o rellena con espacios).
+-- Útil para alinear columnas en la tabla de listado.
+columna :: Int -> String -> String
+columna n texto = take n (texto ++ repeat ' ')
 
--- ── OPCIÓN 1: CHECK IN ──────────────────────────────────────
-checkInStudent :: [Student] -> IO [Student]
-checkInStudent estudiantes = do
-  putStr "Ingrese el ID del estudiante: "
-  sid <- getLine
+-- ================================================================
+-- OPERACIONES DEL MENÚ
+-- ================================================================
+-- Patrón importante: las funciones que MODIFICAN la lista devuelven
+-- IO [Estudiante] (la lista nueva). Las que solo CONSULTAN devuelven
+-- IO () (solo hacen output, no cambian nada).
 
-  case find (\s -> studentId s == sid) estudiantes of
+-- OPCIÓN 1: Registrar entrada de un estudiante
+registrarEntrada :: [Estudiante] -> IO [Estudiante]
+registrarEntrada lista = do
+  putStr "ID del estudiante: " >> getLine >>= \i ->
+    case find ((== i) . idEstudiante) lista of
+      -- Caso: el estudiante ya está adentro, no hacemos nada
+      Just e | estaAdentro e -> putStrLn "[!] Ya esta adentro." >> return lista
+      -- Caso: el estudiante existe pero no está adentro (ya salió antes)
+      Just e -> do
+        t <- ahora
+        -- Creamos una copia del estudiante con la nueva hora de entrada
+        -- y sin hora de salida (la borramos con Nothing)
+        let nueva = actualizar e { horaEntrada = Just t, horaSalida = Nothing } lista
+        guardar nueva >> putStrLn ("[OK] Entrada de " ++ nombre e ++ " a las " ++ t) >> return nueva
+      -- Caso: el estudiante no existe, lo creamos desde cero
+      Nothing -> do
+        putStr "Nombre: "; n <- getLine; t <- ahora
+        let nueva = lista ++ [Estudiante i n (Just t) Nothing]
+        guardar nueva >> putStrLn ("[OK] Entrada de " ++ n ++ " a las " ++ t) >> return nueva
 
-    -- Caso A: El estudiante ya está adentro (tiene entrada, sin salida)
-    Just s | checkIn s /= Nothing && checkOut s == Nothing -> do
-      putStrLn "⚠ El estudiante ya está registrado adentro."
-      return estudiantes
+-- OPCIÓN 2: Buscar un estudiante activo por ID
+buscarEstudiante :: [Estudiante] -> IO ()
+buscarEstudiante lista = do
+  putStr "ID del estudiante: " >> getLine >>= \i ->
+    -- 'find' busca el primer elemento que cumpla la condición
+    case find (\e -> idEstudiante e == i && estaAdentro e) lista of
+      Just e  -> putStrLn $ "\nID: "      ++ idEstudiante e
+                          ++ "\nNombre: " ++ nombre e
+                          ++ "\nEntro a: " ++ fromMaybe "-" (horaEntrada e)
+      Nothing -> putStrLn "[!] No se encontro ningun estudiante activo con ese ID."
 
-    -- Caso B: El estudiante ya existe en el sistema (pero no está adentro)
-    Just s -> do
-      putStr "Ingrese la hora de entrada (HH:MM): "
-      t <- getLine
-      -- Actualizamos SU registro con la nueva hora de entrada
-      let actualizado = map (\x -> if studentId x == sid
-                                   then x { checkIn = Just t, checkOut = Nothing }
-                                   else x) estudiantes
-      saveStudents actualizado
-      putStrLn $ "✓ Check-in registrado para " ++ studentName s ++ " a las " ++ t
-      return actualizado
+-- OPCIÓN 3: Registrar salida de un estudiante
+registrarSalida :: [Estudiante] -> IO [Estudiante]
+registrarSalida lista = do
+  putStr "ID del estudiante: " >> getLine >>= \i ->
+    case find (\e -> idEstudiante e == i && estaAdentro e) lista of
+      Nothing -> putStrLn "[!] No se encontro ese estudiante activo." >> return lista
+      Just e  -> do
+        t <- ahora
+        -- Calculamos cuánto tiempo estuvo en la universidad
+        let diff = aMinutos t - aMinutos (fromMaybe "00:00" (horaEntrada e))
+        let nueva = actualizar e { horaSalida = Just t } lista
+        guardar nueva
+        putStrLn $ "[OK] Salida de " ++ nombre e ++ " a las " ++ t
+        putStrLn $ "     Tiempo: " ++ show (diff `div` 60) ++ "h " ++ show (diff `mod` 60) ++ "min"
+        return nueva
 
-    -- Caso C: El estudiante es NUEVO, no está en el sistema
-    Nothing -> do
-      putStr "Estudiante nuevo. Ingrese el nombre: "
-      nombre <- getLine
-      putStr "Ingrese la hora de entrada (HH:MM): "
-      t <- getLine
-      let nuevo      = Student sid nombre (Just t) Nothing
-      let actualizado = estudiantes ++ [nuevo]
-      saveStudents actualizado
-      putStrLn $ "✓ Check-in registrado para " ++ nombre ++ " a las " ++ t
-      return actualizado
+-- OPCIÓN 4: Mostrar todos los estudiantes
+listarEstudiantes :: [Estudiante] -> IO ()
+listarEstudiantes [] = putStrLn "[INFO] No hay estudiantes registrados."
+listarEstudiantes lista = do
+  putStrLn "\nID        | Nombre               | Entrada  | Salida"
+  putStrLn $ replicate 55 '-'
+  -- 'mapM_' es como un forEach: ejecuta la acción para cada elemento
+  mapM_ (\e -> putStrLn $
+    columna 10 (idEstudiante e) ++ "| " ++
+    columna 22 (nombre e)       ++ "| " ++
+    columna 9  (fromMaybe "-" (horaEntrada e)) ++ "| " ++
+    fromMaybe "-" (horaSalida e)) lista
 
--- ── OPCIÓN 2: BUSCAR POR ID ─────────────────────────────────
-searchStudent :: [Student] -> IO ()
-searchStudent estudiantes = do
-  putStr "Ingrese el ID del estudiante: "
-  sid <- getLine
-  -- Solo buscamos estudiantes que ESTÁN ADENTRO AHORA
-  -- (tienen hora de entrada y NO tienen hora de salida)
-  let adentro = find (\s -> studentId s == sid
-                         && checkIn  s /= Nothing
-                         && checkOut s == Nothing) estudiantes
-  case adentro of
-    Just s -> do
-      putStrLn "\n=== Estudiante encontrado ==="
-      putStrLn $ "ID:     " ++ studentId   s
-      putStrLn $ "Nombre: " ++ studentName s
-      putStrLn $ "Entró:  " ++ fromMaybe "—" (checkIn s)
-    Nothing ->
-      putStrLn "No se encontró ningún estudiante ACTIVO con ese ID."
+-- ================================================================
+-- MENÚ Y BUCLE PRINCIPAL
+-- ================================================================
 
--- ── OPCIÓN 3: CHECK OUT ─────────────────────────────────────
-checkOutStudent :: [Student] -> IO [Student]
-checkOutStudent estudiantes = do
-  putStr "Ingrese el ID del estudiante: "
-  sid <- getLine
-  -- Solo podemos hacer check-out de alguien que esté adentro
-  let adentro = find (\s -> studentId s == sid
-                         && checkIn  s /= Nothing
-                         && checkOut s == Nothing) estudiantes
-  case adentro of
-    Nothing -> do
-      putStrLn "No se encontró ese estudiante activo."
-      return estudiantes
-    Just s -> do
-      putStr "Ingrese la hora de salida (HH:MM): "
-      t <- getLine
-      let entrada     = fromMaybe "00:00" (checkIn s)
-      let duracion    = showDuration entrada t
-      let actualizado = map (\x -> if studentId x == sid
-                                   then x { checkOut = Just t }
-                                   else x) estudiantes
-      saveStudents actualizado
-      putStrLn $ "✓ Check-out registrado para " ++ studentName s
-      putStrLn $ "  Tiempo en la universidad: " ++ duracion
-      return actualizado
-
--- ── OPCIÓN 4: LISTAR ESTUDIANTES ────────────────────────────
-listStudents :: [Student] -> IO ()
-listStudents [] = putStrLn "No hay estudiantes registrados."
-listStudents estudiantes = do
-  putStrLn "\n=== Lista de Estudiantes ==="
-  putStrLn $ columna 8 "ID" ++ " | " ++ columna 18 "Nombre" ++ " | " ++
-             columna 7 "Entrada" ++ " | " ++ "Salida"
-  putStrLn (replicate 52 '-')
-  mapM_ imprimirFila estudiantes
-  where
-    imprimirFila s = putStrLn $
-      columna 8  (studentId   s) ++ " | " ++
-      columna 18 (studentName s) ++ " | " ++
-      columna 7  (fromMaybe "—" (checkIn  s)) ++ " | " ++
-      fromMaybe "—" (checkOut s)
-
-    -- Ajusta una cadena a un ancho fijo (rellena con espacios)
-    columna n str = take n (str ++ repeat ' ')
-
--- ============================================================
--- 7. MENÚ PRINCIPAL
--- ============================================================
-
+-- Imprime las opciones del menú en pantalla.
 mostrarMenu :: IO ()
-mostrarMenu = do
-  putStrLn "\n=============================="
-  putStrLn "  SISTEMA DE REGISTRO EAFIT  "
-  putStrLn "=============================="
-  putStrLn "1. Check In  (Registrar Entrada)"
-  putStrLn "2. Buscar Estudiante por ID"
-  putStrLn "3. Check Out (Registrar Salida)"
-  putStrLn "4. Listar Todos los Estudiantes"
-  putStrLn "5. Salir"
-  putStrLn "=============================="
-  putStr "Seleccione una opción: "
+mostrarMenu = mapM_ putStrLn
+  [ "\n=============================="
+  , "  SISTEMA DE REGISTRO EAFIT  "
+  , "=============================="
+  , "1. Registrar Entrada (Check In)"
+  , "2. Buscar Estudiante por ID"
+  , "3. Registrar Salida (Check Out)"
+  , "4. Listar Todos los Estudiantes"
+  , "5. Salir"
+  , "==============================" ]
 
--- El loop recibe SIEMPRE la lista actualizada
--- Esta es la idea funcional clave: no hay variables globales,
--- la "memoria" se pasa como argumento en cada llamada recursiva.
-mainLoop :: [Student] -> IO ()
-mainLoop estudiantes = do
-  mostrarMenu
-  opcion <- getLine
-  case opcion of
-    "1" -> checkInStudent  estudiantes >>= mainLoop
-    "2" -> searchStudent   estudiantes >>  mainLoop estudiantes
-    "3" -> checkOutStudent estudiantes >>= mainLoop
-    "4" -> listStudents    estudiantes >>  mainLoop estudiantes
-    "5" -> putStrLn "¡Hasta luego!"
-    _   -> putStrLn "Opción inválida." >> mainLoop estudiantes
+-- Bucle principal del programa. Recibe la lista actual de estudiantes,
+-- muestra el menú, lee la opción del usuario y llama la función correcta.
+-- Después se llama a sí mismo (recursión) con la lista actualizada.
+-- Cuando el usuario elige "5", la recursión termina y el programa cierra.
+bucle :: [Estudiante] -> IO ()
+bucle lista = do
+  mostrarMenu >> putStr "Opcion: " >> getLine >>= \op -> putStrLn "" >> case op of
+    "1" -> registrarEntrada  lista >>= bucle   -- >>= pasa el resultado (lista nueva) al siguiente bucle
+    "2" -> buscarEstudiante  lista >>  bucle lista
+    "3" -> registrarSalida   lista >>= bucle
+    "4" -> listarEstudiantes lista >>  bucle lista
+    "5" -> putStrLn "Hasta luego!"
+    _   -> putStrLn "[!] Opcion invalida." >> bucle lista
 
--- ============================================================
--- 8. PUNTO DE ENTRADA
--- ============================================================
-
+-- Punto de entrada del programa.
+-- 'main' es la función que Haskell ejecuta al iniciar.
 main :: IO ()
 main = do
-  -- Desactivar el buffer para que la salida aparezca inmediatamente
-  hSetBuffering stdout NoBuffering
-  putStrLn "Cargando datos desde University.txt..."
-  estudiantes <- loadStudents
-  putStrLn $ "Se cargaron " ++ show (length estudiantes) ++ " estudiante(s)."
-  mainLoop estudiantes
+  hSetBuffering stdout NoBuffering  -- Salida inmediata sin buffer
+  hSetEncoding  stdout utf8         -- Evita errores de caracteres en Windows
+  lista <- cargar
+  putStrLn $ "Cargados: " ++ show (length lista) ++ " estudiante(s)."
+  bucle lista
