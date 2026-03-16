@@ -81,10 +81,3 @@ La **opción 5** cierra el programa.
 
 ---
 
-## Conceptos clave para la defensa
-
-**¿Por qué Haskell pasa la lista como argumento en el bucle?** En Haskell los datos son inmutables: una lista creada no puede modificarse directamente. Cada operación devuelve una lista nueva con los cambios aplicados, y el `bucle` siempre recibe la versión más reciente como argumento. Esa es la forma funcional de mantener estado: no hay variables globales, la "memoria" del programa viaja como argumento de función en función.
-
-**¿Por qué Prolog usa `retract` y `assertz` para modificar un estudiante?** En Prolog los hechos son inmutables una vez creados. Para "modificar" un estudiante hay que hacer `retract` del hecho viejo (borrarlo de la base de datos) y `assertz` del hecho nuevo actualizado (agregarlo al final). Es la forma lógica de actualizar información.
-
-**¿Cuál es la diferencia entre programación funcional y lógica?** En Haskell describes *transformaciones*: "dada esta lista, devuelve una lista nueva con este cambio aplicado". En Prolog describes *conocimiento*: "esto es verdad sobre el mundo", y el motor de inferencia decide cómo satisfacer cada consulta usando unificación y backtracking.
