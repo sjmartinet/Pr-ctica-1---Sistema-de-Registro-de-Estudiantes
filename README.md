@@ -3,15 +3,22 @@
 
 ---
 
-## Archivos del proyecto
+## Estructura del proyecto
 
-El proyecto contiene tres archivos principales. `Main.hs` es la versión funcional escrita completamente en Haskell. `main_swish.pl` es la versión lógica escrita en Prolog, adaptada para ejecutarse en el navegador usando SWISH. `University.txt` es el archivo de datos que usa Haskell para guardar y cargar estudiantes entre sesiones.
+Los tres archivos deben estar siempre en la misma carpeta. Así es como debe verse tu carpeta antes de ejecutar cualquiera de los dos programas:
+
+```
+tu-carpeta/
+├── Main.hs           → Versión Haskell (paradigma funcional)
+├── main.pl           → Versión Prolog  (paradigma lógico)
+└── University.txt    → Archivo de datos compartido por ambos
+```
 
 ---
 
-## Formato de University.txt
+## El archivo University.txt
 
-Cada línea representa un estudiante con 4 campos separados por coma: `ID,Nombre,HoraEntrada,HoraSalida`. Si una hora está vacía significa que no ha sido registrada todavía.
+Ambos programas leen y escriben el mismo archivo `University.txt`. Cada línea representa un estudiante con 4 campos separados por coma: `ID,Nombre,HoraEntrada,HoraSalida`. Si una hora está vacía significa que todavía no ha sido registrada.
 
 ```
 1001,Ana Garcia,08:30,
@@ -19,86 +26,65 @@ Cada línea representa un estudiante con 4 campos separados por coma: `ID,Nombre
 1003,Maria Torres,,
 ```
 
+En el ejemplo de arriba, Ana está actualmente adentro (tiene entrada pero no salida), Carlos ya salió (tiene ambas horas), y Maria nunca ha hecho check-in (no tiene ninguna hora).
+
+Ninguno de los dos programas mantiene el archivo abierto permanentemente. Al arrancar leen el archivo completo, y cada vez que hay un cambio (check-in o check-out) sobreescriben el archivo entero. Esto significa que si usas Haskell, cierras el programa y luego abres Prolog, Prolog verá exactamente los datos que Haskell dejó guardados. **No ejecutes los dos al mismo tiempo**, ya que podrían pisarse al escribir.
+
 ---
 
 ## Versión Haskell — Cómo ejecutar
 
-Necesitas tener GHC instalado. Puedes descargarlo desde https://www.haskell.org/ghcup/
+Primero necesitas tener GHC instalado. Si no lo tienes, descárgalo desde https://www.haskell.org/ghcup/ e instala la versión recomendada.
 
-Coloca `Main.hs` y `University.txt` en la misma carpeta. Luego abre una terminal en esa carpeta y ejecuta:
+Abre una terminal, navega hasta la carpeta del proyecto y ejecuta uno de estos dos comandos:
 
 ```bash
-# Opción 1: compilar primero y luego ejecutar (más rápido)
+# Opción 1: compilar y luego ejecutar (más rápido para uso repetido)
 ghc Main.hs -o registro
 ./registro
 
-# Opción 2: ejecutar directamente sin compilar
+# Opción 2: ejecutar directamente sin compilar (más simple)
 runghc Main.hs
 ```
 
-El programa muestra un menú numerado en la terminal. Escribe el número de la opción y presiona Enter. La hora de entrada y salida se toma automáticamente del reloj de tu computador, no tienes que escribirla.
+El programa muestra un menú numerado en la terminal. Escribe el número de la opción que quieras y presiona Enter. La hora de entrada y salida se captura automáticamente del reloj de tu computador, no tienes que escribirla manualmente.
 
 ---
 
-## Versión Prolog — Cómo ejecutar en SWISH
+## Versión Prolog — Cómo ejecutar
 
-SWISH es un entorno Prolog que corre directamente en el navegador, sin instalar nada. El archivo `main_swish.pl` está diseñado específicamente para funcionar allí.
+Primero necesitas tener SWI-Prolog instalado. Si no lo tienes, descárgalo desde https://www.swi-prolog.org/download/stable
 
-**Paso 1:** Entra a https://swish.swi-prolog.org desde cualquier navegador.
+Abre una terminal, navega hasta la carpeta del proyecto y ejecuta:
 
-**Paso 2:** Verás un editor de código a la izquierda. Borra el contenido que traiga por defecto, luego abre el archivo `main_swish.pl`, copia todo su contenido y pégalo en ese editor.
-
-**Paso 3:** Haz clic en el botón azul **"Run!"** en la parte superior derecha del editor. Esto carga el programa y automáticamente mostrará los estudiantes de ejemplo y las consultas disponibles.
-
-**Paso 4:** En el panel inferior (donde dice "?-") escribe la consulta que quieras ejecutar y presiona Enter o el botón de play.
-
-### Consultas disponibles
-
-Para registrar la entrada de un estudiante que ya existe en el sistema escribe en el panel de consultas:
-```prolog
-?- registrar_entrada('1001', 'Ana Garcia').
+```bash
+swipl -g main -t halt main.pl
 ```
 
-Para registrar la entrada de un estudiante completamente nuevo (el segundo argumento es el nombre):
-```prolog
-?- registrar_entrada('9999', 'Nuevo Estudiante').
-```
+Al igual que Haskell, muestra un menú numerado en la terminal. Escribe el número y presiona Enter. La hora también se toma automáticamente del reloj del sistema.
 
-Para buscar un estudiante que esté actualmente adentro:
-```prolog
-?- buscar_estudiante('1003').
-```
+---
 
-Para registrar la salida de un estudiante activo:
-```prolog
-?- registrar_salida('1003').
-```
+## Funciones disponibles en ambos programas
 
-Para ver la lista completa de todos los estudiantes:
-```prolog
-?- listar_estudiantes.
-```
+Los dos programas tienen exactamente las mismas opciones, numeradas igual en el menú:
 
-### Datos de ejemplo precargados
+La **opción 1** registra la entrada de un estudiante. Si el ID ya existe en el sistema lo actualiza, si es nuevo te pide el nombre y lo crea.
 
-El programa incluye 5 estudiantes de ejemplo que cubren todos los casos posibles. Ana y Carlos no tienen ninguna hora registrada, así que sirven para probar el check-in. Maria y Sofia están actualmente adentro (tienen entrada pero no salida), así que sirven para probar la búsqueda y el check-out. Pedro ya completó su visita y tiene ambas horas registradas, así que sirve para ver un registro completo en el listado.
+La **opción 2** busca un estudiante por ID. Solo muestra estudiantes que estén actualmente adentro, es decir, que tengan hora de entrada pero no de salida.
 
-### Nota importante sobre SWISH
+La **opción 3** registra la salida de un estudiante activo y calcula automáticamente cuánto tiempo estuvo en la universidad.
 
-SWISH no guarda datos entre sesiones. Cada vez que recargas la página o haces clic en "Run!" de nuevo, la base de datos vuelve a los 5 estudiantes de ejemplo originales. Esto es normal y esperado: es la forma en que funciona el entorno web.
+La **opción 4** lista todos los estudiantes del archivo, tanto los activos como los que ya salieron o nunca entraron.
+
+La **opción 5** cierra el programa.
 
 ---
 
 ## Conceptos clave para la defensa
 
-**¿Por qué Haskell pasa la lista como argumento en el bucle?**
-En Haskell los datos son inmutables: una lista creada no puede modificarse. Cada operación devuelve una lista nueva con los cambios aplicados. El `bucle` siempre recibe la versión más reciente como argumento, que es la forma funcional de mantener estado.
+**¿Por qué Haskell pasa la lista como argumento en el bucle?** En Haskell los datos son inmutables: una lista creada no puede modificarse directamente. Cada operación devuelve una lista nueva con los cambios aplicados, y el `bucle` siempre recibe la versión más reciente como argumento. Esa es la forma funcional de mantener estado: no hay variables globales, la "memoria" del programa viaja como argumento de función en función.
 
-**¿Por qué Prolog usa `retract` y `assertz` para modificar un estudiante?**
-En Prolog los hechos son inmutables una vez creados. Para "modificar" un estudiante hay que hacer `retract` del hecho viejo (borrarlo) y `assertz` del hecho nuevo actualizado (agregarlo al final). Es la forma lógica de actualizar información.
+**¿Por qué Prolog usa `retract` y `assertz` para modificar un estudiante?** En Prolog los hechos son inmutables una vez creados. Para "modificar" un estudiante hay que hacer `retract` del hecho viejo (borrarlo de la base de datos) y `assertz` del hecho nuevo actualizado (agregarlo al final). Es la forma lógica de actualizar información.
 
-**¿Por qué la versión Prolog no tiene menú como la versión Haskell?**
-SWISH es un entorno web sin terminal interactiva, así que no es posible leer texto del usuario con `read_line_to_string`. En cambio, cada operación es un predicado independiente que recibe los datos como argumentos directamente en la consulta. Esto es más natural en Prolog de todas formas, porque Prolog fue diseñado para responder consultas, no para ejecutar programas secuenciales.
-
-**¿Cuál es la diferencia entre programación funcional y lógica?**
-En Haskell describes transformaciones: "dada esta lista, devuelve una lista nueva con este cambio". En Prolog describes conocimiento: "esto es verdad sobre el mundo" y el motor de Prolog decide cómo satisfacer cada consulta usando unificación y backtracking.
+**¿Cuál es la diferencia entre programación funcional y lógica?** En Haskell describes *transformaciones*: "dada esta lista, devuelve una lista nueva con este cambio aplicado". En Prolog describes *conocimiento*: "esto es verdad sobre el mundo", y el motor de inferencia decide cómo satisfacer cada consulta usando unificación y backtracking.
